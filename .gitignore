@@ -1,0 +1,14 @@
+# Roblox Studio local/autosave files
+*.rbxl
+*.rbxlx.lock
+*.rbxl.autosave
+*.rbxlx.autosave
+
+# Rojo and package tooling
+rojo-sourcemap.json
+sourcemap.json
+Packages/
+
+# Editor / OS
+.DS_Store
+.vscode/
