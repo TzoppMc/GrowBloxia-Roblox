@@ -182,7 +182,7 @@ create("TextLabel", {
 	Position = UDim2.fromOffset(10, 7),
 	Size = UDim2.new(1, -20, 1, -14),
 	BackgroundTransparency = 1,
-	Text = "[1–5] PILIH ITEM\n[KLIK KIRI] GUNAKAN / PANEN\n[KLIK KANAN] CABUT / BONGKAR",
+	Text = "[A / D] JALAN • [SPACE] LOMPAT\n[1–7] PILIH ITEM • [KLIK KIRI] GUNAKAN\n[KLIK KANAN] BONGKAR BLOK",
 	TextColor3 = Color3.fromRGB(231, 240, 245),
 	TextSize = 12,
 	TextWrapped = true,
@@ -438,9 +438,9 @@ local function getCellFromInstance(instance)
 	local current = instance
 	while current do
 		local x = current:GetAttribute("CellX")
-		local z = current:GetAttribute("CellZ")
-		if typeof(x) == "number" and typeof(z) == "number" then
-			return x, z, current
+		local y = current:GetAttribute("CellY")
+		if typeof(x) == "number" and typeof(y) == "number" then
+			return x, y, current
 		end
 		if current == Workspace then
 			break
@@ -454,7 +454,32 @@ local raycastParams = RaycastParams.new()
 raycastParams.FilterType = Enum.RaycastFilterType.Exclude
 raycastParams.IgnoreWater = true
 
-local function getCellAtScreenPosition(screenPosition)
+-- A 2D block is seen face-on, so clicking a normal/front face does not reveal
+-- the adjacent grid cell. For placeable blocks, infer the nearest edge of the
+-- clicked tile and use that neighboring cell as the placement target.
+local function getPlacementCell(x, y, raycastResult)
+	if not raycastResult then
+		return x, y
+	end
+
+	local normal = raycastResult.Normal
+	if math.abs(normal.X) > 0.5 then
+		return x + (normal.X > 0 and 1 or -1), y
+	end
+	if math.abs(normal.Y) > 0.5 then
+		return x, y + (normal.Y > 0 and 1 or -1)
+	end
+
+	local center = Config.cellToWorld(x, y, Config.Camera.PlaneZ)
+	local deltaX = raycastResult.Position.X - center.X
+	local deltaY = raycastResult.Position.Y - center.Y
+	if math.abs(deltaX) > math.abs(deltaY) then
+		return x + (deltaX >= 0 and 1 or -1), y
+	end
+	return x, y + (deltaY >= 0 and 1 or -1)
+end
+
+local function getCellAtScreenPosition(screenPosition, itemId)
 	local camera = Workspace.CurrentCamera
 	if camera and screenPosition then
 		local character = player.Character
@@ -462,9 +487,13 @@ local function getCellAtScreenPosition(screenPosition)
 		local ray = camera:ViewportPointToRay(screenPosition.X, screenPosition.Y)
 		local result = Workspace:Raycast(ray.Origin, ray.Direction * 500, raycastParams)
 		if result then
-			local x, z, instance = getCellFromInstance(result.Instance)
+			local x, y, instance = getCellFromInstance(result.Instance)
 			if x then
-				return x, z, instance
+				local item = Config.Items[itemId]
+				if item and item.kind == "block" then
+					x, y = getPlacementCell(x, y, result)
+				end
+				return x, y, instance
 			end
 		end
 	end
@@ -498,21 +527,21 @@ local function findAttribute(instance, attribute)
 	return nil
 end
 
-local function getTileForCell(x, z)
+local function getTileForCell(x, y)
 	local world = Workspace:FindFirstChild("GrowBloxiaWorld")
 	local tiles = world and world:FindFirstChild("Tiles")
-	return tiles and tiles:FindFirstChild(string.format("Tile_%d_%d", x, z))
+	return tiles and tiles:FindFirstChild(string.format("Tile_%d_%d", x, y))
 end
 
 local function updateTargetDisplay()
-	local x, z, hit = getCellFromInstance(mouse.Target)
+	local x, y, hit = getCellFromInstance(mouse.Target)
 	if not x then
 		targetHighlight.Enabled = false
 		contextPanel.Visible = false
 		return
 	end
 
-	local tile = getTileForCell(x, z)
+	local tile = getTileForCell(x, y)
 	targetHighlight.Adornee = tile or hit
 	targetHighlight.Enabled = targetHighlight.Adornee ~= nil
 	contextPanel.Visible = true
@@ -540,18 +569,19 @@ local function sendAction(action, screenPosition)
 		return
 	end
 
-	local x, z = getCellAtScreenPosition(screenPosition)
+	local itemId = currentItemId()
+	local x, y = getCellAtScreenPosition(screenPosition, itemId)
 	if not x then
-		showToast("Arahkan kursor ke petak kebun terlebih dahulu.", "warning")
+		showToast("Arahkan kursor ke blok atau tanah kebun terlebih dahulu.", "warning")
 		return
 	end
 
 	lastActionAt = os.clock()
 	actionRequest:FireServer({
 		action = action,
-		itemId = currentItemId(),
+		itemId = itemId,
 		x = x,
-		z = z,
+		y = y,
 	})
 end
 
@@ -569,6 +599,8 @@ local numberKeys = {
 	[Enum.KeyCode.Three] = 3,
 	[Enum.KeyCode.Four] = 4,
 	[Enum.KeyCode.Five] = 5,
+	[Enum.KeyCode.Six] = 6,
+	[Enum.KeyCode.Seven] = 7,
 }
 
 UserInputService.InputBegan:Connect(function(input, gameProcessed)

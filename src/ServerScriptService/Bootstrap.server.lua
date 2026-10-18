@@ -53,8 +53,8 @@ actionRequest.OnServerEvent:Connect(function(player, payload)
 end)
 
 local function placeCharacterAtGarden(character)
-	task.delay(0.15, function()
-		local root = character:FindFirstChild("HumanoidRootPart")
+	task.spawn(function()
+		local root = character:WaitForChild("HumanoidRootPart", 5)
 		if root and root.Parent then
 			root.CFrame = CFrame.new(WorldService:GetSpawnPosition())
 		end

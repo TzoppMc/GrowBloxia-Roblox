@@ -9,8 +9,8 @@ assets yet.
 
 | Local source file | Drive file ID | Dimensions | Planned use | `AssetManifest` field |
 | --- | --- | ---: | --- | --- |
-| `source/tiles/tiles_page1.png` | `1F7mPVJlzp-UocfbyHwzFjjIIBcBmCtAo` | 1024×1024 | Tile atlas / future 2D world presentation | `Tiles.page1` |
-| `source/tiles/tiles_page2.png` | `1S0uv4g0si8T1E_LbeSSs_8J-JG2Ma6eq` | 1024×1024 | Tile atlas / future 2D world presentation | `Tiles.page2` |
+| `source/tiles/tiles_page1.png` | `1F7mPVJlzp-UocfbyHwzFjjIIBcBmCtAo` | 1024×1024 | 2D tile atlas; pending per-tile sprite slicing | `Tiles.page1` |
+| `source/tiles/tiles_page2.png` | `1S0uv4g0si8T1E_LbeSSs_8J-JG2Ma6eq` | 1024×1024 | 2D tile atlas; pending per-tile sprite slicing | `Tiles.page2` |
 | `source/tiles/seed.png` | `1VuUbSjrP1yhLwybtMwJoOmk5FMm5h6XD` | 256×32 | Seed strip | `Tiles.seedStrip` |
 | `source/tiles/water.png` | `1HM0puXtOOQUceEs27X1xgqStQKvHT8IZ` | 256×256 | Water animation sheet | `Tiles.waterSheet` |
 | `source/gui/gui_box.png` | `1QbeMUA5euOKLhJwM2PjBPShj9smp-WgV` | 32×32 | Sliceable pixel UI panel frame | `UI.panelFrame` |

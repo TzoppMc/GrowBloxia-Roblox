@@ -1,7 +1,7 @@
 --!nocheck
--- Validates every farming action on the server. The client only asks to act on
--- a grid cell; inventory mutation, range checks, crop timers, and yields happen
--- here so exploiters cannot grant themselves items or harvest from afar.
+-- Server-authoritative 2D tile farming and block interaction service. Clients
+-- only request an action; range checks, tile mutation, growth, and item grants
+-- remain on the server.
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -200,9 +200,34 @@ function FarmService:_useOnPlant(player, cell, itemId, now)
 	end
 end
 
-function FarmService:_useOnEmptyCell(player, cell, itemId, now)
+function FarmService:_placeBlock(player, cell, itemId, item)
+	if cell.tileType ~= "Air" then
+		self:Notify(player, "Blok hanya dapat diletakkan di ruang kosong.", "warning")
+		return
+	end
+
+	if not self.World:HasSolidNeighbor(cell) then
+		self:Notify(player, "Blok harus tersambung ke blok lain.", "warning")
+		return
+	end
+
+	if not self.Inventory:RemoveItem(player, itemId, 1) then
+		self:Notify(player, "Blok itu tidak ada di inventori.", "warning")
+		return
+	end
+
+	self.World:SetTileType(cell, item.placeTile)
+	self:Notify(player, string.format("%s diletakkan.", item.displayName), "success")
+end
+
+function FarmService:_useOnTile(player, cell, itemId)
 	local item = Config.Items[itemId]
 	if not item then
+		return
+	end
+
+	if item.kind == "block" and item.placeTile then
+		self:_placeBlock(player, cell, itemId, item)
 		return
 	end
 
@@ -210,25 +235,13 @@ function FarmService:_useOnEmptyCell(player, cell, itemId, now)
 		if not self.Inventory:HasItem(player, itemId, 1) then
 			return
 		end
-		if cell.tileType == "Grass" then
+		if cell.tileType == "Grass" or cell.tileType == "Dirt" then
 			self.World:SetTileType(cell, "Farmland")
-			self:Notify(player, "Rumput dicangkul menjadi tanah kebun.", "success")
+			self:Notify(player, "Blok diolah menjadi tanah kebun.", "success")
+		elseif cell.tileType == "Farmland" then
+			self:Notify(player, "Petak ini sudah siap ditanami.", "info")
 		else
-			self:Notify(player, "Petak ini sudah siap untuk ditanami.", "info")
-		end
-		return
-	end
-
-	if itemId == "dirt_block" then
-		if cell.tileType == "Grass" then
-			if not self.Inventory:RemoveItem(player, itemId, 1) then
-				self:Notify(player, "Blok tanah tidak tersedia.", "warning")
-				return
-			end
-			self.World:SetTileType(cell, "Farmland")
-			self:Notify(player, "Blok tanah diletakkan menjadi petak kebun.", "success")
-		else
-			self:Notify(player, "Petak ini sudah berupa tanah kebun.", "info")
+			self:Notify(player, "Cangkul hanya dapat digunakan pada rumput atau tanah.", "warning")
 		end
 		return
 	end
@@ -244,7 +257,7 @@ function FarmService:_useOnEmptyCell(player, cell, itemId, now)
 		return
 	end
 
-	self:Notify(player, "Item ini tidak dapat digunakan di petak kosong.", "warning")
+	self:Notify(player, "Item ini tidak dapat digunakan pada tile tersebut.", "warning")
 end
 
 function FarmService:_breakCell(player, cell, now)
@@ -266,12 +279,25 @@ function FarmService:_breakCell(player, cell, now)
 		return
 	end
 
-	if cell.tileType == "Farmland" then
-		self.World:SetTileType(cell, "Grass")
-		self:Notify(player, "Petak kebun dibongkar menjadi rumput.", "info")
-	else
-		self:Notify(player, "Tidak ada yang bisa dihancurkan di sini.", "info")
+	if cell.tileType == "Air" then
+		self:Notify(player, "Tidak ada blok di sini.", "info")
+		return
 	end
+
+	if cell.tileType == "Farmland" then
+		self.World:SetTileType(cell, "Dirt")
+		self:Notify(player, "Tanah kebun dikembalikan menjadi blok tanah.", "info")
+		return
+	end
+
+	local tileData = Config.TileTypes[cell.tileType]
+	if not tileData or not tileData.dropItem then
+		return
+	end
+
+	self.World:SetTileType(cell, "Air")
+	self.Inventory:AddItem(player, tileData.dropItem, 1)
+	self:Notify(player, string.format("Blok dibongkar: +1 %s", Config.Items[tileData.dropItem].displayName), "success")
 end
 
 function FarmService:HandleAction(player, payload)
@@ -282,9 +308,9 @@ function FarmService:HandleAction(player, payload)
 	local action = payload.action
 	local itemId = payload.itemId
 	local x = payload.x
-	local z = payload.z
+	local y = payload.y
 
-	if (action ~= "use" and action ~= "break") or not isInteger(x) or not isInteger(z) then
+	if (action ~= "use" and action ~= "break") or not isInteger(x) or not isInteger(y) then
 		return
 	end
 
@@ -292,7 +318,7 @@ function FarmService:HandleAction(player, payload)
 		return
 	end
 
-	local cell = self.World:GetCell(x, z)
+	local cell = self.World:GetCell(x, y)
 	if not cell or not self:_isPlayerNearCell(player, cell) then
 		return
 	end
@@ -309,7 +335,7 @@ function FarmService:HandleAction(player, payload)
 	elseif cell.plant then
 		self:_useOnPlant(player, cell, itemId, now)
 	else
-		self:_useOnEmptyCell(player, cell, itemId, now)
+		self:_useOnTile(player, cell, itemId)
 	end
 end
 
