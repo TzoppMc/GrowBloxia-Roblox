@@ -15,6 +15,8 @@ local mouse = player:GetMouse()
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Config = require(Shared:WaitForChild("GameConfig"))
+local AssetManifest = require(Shared:WaitForChild("AssetManifest"))
+local AssetResolver = require(Shared:WaitForChild("AssetResolver"))
 local remotes = ReplicatedStorage:WaitForChild("GrowBloxiaRemotes")
 local actionRequest = remotes:WaitForChild("ActionRequest")
 local requestState = remotes:WaitForChild("RequestState")
@@ -41,6 +43,21 @@ local function addStroke(parent, color, thickness)
 	})
 end
 
+-- AssetManifest values stay optional so a blank/missing Roblox image ID never
+-- breaks the playable fallback UI.
+local function addOptionalImage(parent, assetReference, properties)
+	local image = AssetResolver.toContentId(assetReference)
+	if not image then
+		return nil
+	end
+
+	local options = properties or {}
+	options.Image = image
+	options.BackgroundTransparency = 1
+	options.Parent = parent
+	return create("ImageLabel", options)
+end
+
 local oldGui = playerGui:FindFirstChild("GrowBloxiaHUD")
 if oldGui then
 	oldGui:Destroy()
@@ -65,6 +82,13 @@ local topPanel = create("Frame", {
 	Parent = gui,
 })
 addStroke(topPanel, Color3.fromRGB(255, 222, 133), 2)
+addOptionalImage(topPanel, AssetManifest.UI.panelFrame, {
+	Name = "AssetFrame",
+	Size = UDim2.fromScale(1, 1),
+	ScaleType = Enum.ScaleType.Slice,
+	SliceCenter = Rect.new(6, 6, 26, 26),
+	ImageTransparency = 0.10,
+})
 
 local pocketPanel = create("Frame", {
 	Name = "PocketPanel",
@@ -76,6 +100,13 @@ local pocketPanel = create("Frame", {
 	Parent = gui,
 })
 addStroke(pocketPanel, Color3.fromRGB(117, 192, 138), 2)
+addOptionalImage(pocketPanel, AssetManifest.UI.panelFrame, {
+	Name = "AssetFrame",
+	Size = UDim2.fromScale(1, 1),
+	ScaleType = Enum.ScaleType.Slice,
+	SliceCenter = Rect.new(6, 6, 26, 26),
+	ImageTransparency = 0.10,
+})
 
 create("TextLabel", {
 	Position = UDim2.fromOffset(10, 7),
@@ -139,6 +170,13 @@ local helpPanel = create("Frame", {
 	Parent = gui,
 })
 addStroke(helpPanel, Color3.fromRGB(109, 166, 196), 1)
+addOptionalImage(helpPanel, AssetManifest.UI.panelFrame, {
+	Name = "AssetFrame",
+	Size = UDim2.fromScale(1, 1),
+	ScaleType = Enum.ScaleType.Slice,
+	SliceCenter = Rect.new(6, 6, 26, 26),
+	ImageTransparency = 0.16,
+})
 
 create("TextLabel", {
 	Position = UDim2.fromOffset(10, 7),
@@ -313,6 +351,20 @@ local function refreshHotbar()
 			Parent = hotbarFrame,
 		})
 		addStroke(button, selected and Color3.fromRGB(255, 244, 197) or Color3.fromRGB(23, 31, 46), selected and 3 or 2)
+		addOptionalImage(button, AssetManifest.UI.itemBox, {
+			Name = "AssetSlotFrame",
+			Size = UDim2.fromScale(1, 1),
+			ImageRectOffset = Vector2.new(0, 0),
+			ImageRectSize = Vector2.new(64, 64),
+			ImageTransparency = selected and 0 or 0.18,
+		})
+		if selected then
+			addOptionalImage(button, AssetManifest.UI.inventorySelection, {
+				Name = "AssetSelection",
+				Size = UDim2.fromScale(1, 1),
+				ImageTransparency = 0.05,
+			})
+		end
 
 		create("TextLabel", {
 			Name = "Key",

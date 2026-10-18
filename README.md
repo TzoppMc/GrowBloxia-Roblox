@@ -65,17 +65,20 @@ assets/
 
 ## Bringing in your assets
 
-Put exports, textures, UI art, audio, and placement notes under `assets/` using the
-structure in [`assets/README.md`](assets/README.md). Then either:
+A core source subset from the connected `GrowBloxia/Asset` Google Drive folder is
+already stored under `assets/source/`. See [`assets/ASSET_CATALOG.md`](assets/ASSET_CATALOG.md)
+for the source files and their intended mappings.
 
-- publish them through Creator Dashboard and enter their IDs in
-  `src/ReplicatedStorage/Shared/AssetManifest.lua`, or
-- import `.rbxm` models in Studio and swap the generated visuals in
-  `WorldService.lua`.
+Roblox cannot render a Google Drive URL or local PNG directly in a published game.
+Upload the source images through Creator Dashboard / Studio Asset Manager and enter
+the resulting IDs in `src/ReplicatedStorage/Shared/AssetManifest.lua`. The HUD
+will automatically use the panel, hotbar-slot, and selection frame assets once
+those IDs are present; blank IDs safely retain the built-in fallback visuals.
 
-The gameplay data is deliberately separate from the visuals. For example, crop
-speed/yield lives in `GameConfig.lua`, while `WorldService:RefreshPlantVisual` is
-the single place that will be replaced with your crop models.
+For `.rbxm` models, import them in Studio and replace the procedural constructors
+in `WorldService.lua`. Gameplay data remains independent of art: crop speed/yield
+lives in `GameConfig.lua`, while `WorldService:RefreshPlantVisual` is the single
+point intended for crop visual replacement.
 
 ## Current MVP boundary
 
