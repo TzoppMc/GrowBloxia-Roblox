@@ -1,0 +1,316 @@
+--!nocheck
+-- Validates every farming action on the server. The client only asks to act on
+-- a grid cell; inventory mutation, range checks, crop timers, and yields happen
+-- here so exploiters cannot grant themselves items or harvest from afar.
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local Config = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("GameConfig"))
+
+local FarmService = {}
+FarmService.World = nil
+FarmService.Inventory = nil
+FarmService.NotifyRemote = nil
+FarmService._cooldowns = {}
+
+local function isInteger(value)
+	return typeof(value) == "number" and value == value and value % 1 == 0
+end
+
+function FarmService:Init(worldService, inventoryService, notifyRemote)
+	self.World = worldService
+	self.Inventory = inventoryService
+	self.NotifyRemote = notifyRemote
+
+	Players.PlayerRemoving:Connect(function(player)
+		self._cooldowns[player] = nil
+	end)
+
+	task.spawn(function()
+		while true do
+			self:UpdateGrowth()
+			task.wait(Config.Farming.GrowthUpdateSeconds)
+		end
+	end)
+end
+
+function FarmService:Notify(player, text, kind)
+	if self.NotifyRemote and player.Parent then
+		self.NotifyRemote:FireClient(player, {
+			text = text,
+			kind = kind or "info",
+		})
+	end
+end
+
+function FarmService:_advancePlant(cell, now)
+	local plant = cell.plant
+	if not plant then
+		return
+	end
+
+	local lastUpdate = plant.lastGrowthAt or now
+	if now <= lastUpdate then
+		return
+	end
+
+	local elapsed = now - lastUpdate
+	local wateredUntil = plant.wateredUntil or 0
+	local boostedSeconds = math.max(0, math.min(now, wateredUntil) - lastUpdate)
+	boostedSeconds = math.min(boostedSeconds, elapsed)
+	local drySeconds = elapsed - boostedSeconds
+
+	plant.growth = (plant.growth or 0)
+		+ drySeconds
+		+ boostedSeconds * Config.Farming.WaterGrowthMultiplier
+	plant.lastGrowthAt = now
+end
+
+function FarmService:_getStage(crop, growth)
+	local progress = math.clamp(growth / crop.growSeconds, 0, 1)
+	return math.clamp(math.floor(progress * crop.stageCount) + 1, 1, crop.stageCount)
+end
+
+function FarmService:_refreshPlant(cell, now)
+	local plant = cell.plant
+	if not plant then
+		return
+	end
+
+	local crop = Config.Crops[plant.cropId]
+	if not crop then
+		return
+	end
+
+	self:_advancePlant(cell, now)
+	plant.stage = self:_getStage(crop, plant.growth)
+	self.World:RefreshPlantVisual(cell, false)
+end
+
+function FarmService:UpdateGrowth()
+	if not self.World then
+		return
+	end
+
+	local now = os.time()
+	for _, cell in ipairs(self.World:GetCells()) do
+		if cell.plant then
+			self:_refreshPlant(cell, now)
+		end
+	end
+end
+
+function FarmService:_isPlayerNearCell(player, cell)
+	local character = player.Character
+	local root = character and character:FindFirstChild("HumanoidRootPart")
+	if not root then
+		return false
+	end
+
+	local targetPosition = self.World:GetCellWorldPosition(cell)
+	return (root.Position - targetPosition).Magnitude <= Config.Interaction.MaxDistance
+end
+
+function FarmService:_plantSeed(player, cell, itemId, cropId, crop)
+	if cell.tileType ~= "Farmland" then
+		self:Notify(player, "Benih hanya bisa ditanam di tanah kebun.", "warning")
+		return
+	end
+
+	if cell.plant then
+		self:Notify(player, "Petak ini sudah terisi tanaman.", "warning")
+		return
+	end
+
+	if not self.Inventory:RemoveItem(player, itemId, 1) then
+		self:Notify(player, "Benih itu tidak ada di inventori.", "warning")
+		return
+	end
+
+	local now = os.time()
+	self.World:SetPlant(cell, {
+		cropId = cropId,
+		growth = 0,
+		stage = 1,
+		lastGrowthAt = now,
+		wateredUntil = 0,
+	})
+	self:Notify(player, string.format("%s ditanam. Siram agar lebih cepat tumbuh!", crop.displayName), "success")
+end
+
+function FarmService:_waterPlant(player, cell, now)
+	local plant = cell.plant
+	if not plant then
+		self:Notify(player, "Arahkan penyiram ke tanaman.", "warning")
+		return
+	end
+
+	local crop = Config.Crops[plant.cropId]
+	if not crop then
+		return
+	end
+
+	self:_refreshPlant(cell, now)
+	if plant.growth >= crop.growSeconds then
+		self:Notify(player, "Tanaman ini sudah siap dipanen.", "info")
+		return
+	end
+
+	local currentEnd = math.max(now, plant.wateredUntil or 0)
+	plant.wateredUntil = math.min(
+		currentEnd + Config.Farming.WaterDuration,
+		now + Config.Farming.WaterDuration * 2
+	)
+	self.World:RefreshPlantVisual(cell, true)
+	self:Notify(player, "Disiram! Pertumbuhan tanaman dipercepat.", "success")
+end
+
+function FarmService:_harvest(player, cell, crop)
+	local amount = math.random(crop.yieldMin, crop.yieldMax)
+	self.World:SetPlant(cell, nil)
+	self.Inventory:AddItem(player, crop.harvestItem, amount)
+
+	local message = string.format("Panen berhasil: +%d %s", amount, crop.displayName)
+	if math.random() <= crop.seedReturnChance then
+		self.Inventory:AddItem(player, crop.seedItem, 1)
+		message = message .. " dan +1 benih"
+	end
+
+	self:Notify(player, message, "success")
+end
+
+function FarmService:_useOnPlant(player, cell, itemId, now)
+	local plant = cell.plant
+	local crop = plant and Config.Crops[plant.cropId]
+	if not crop then
+		return
+	end
+
+	self:_refreshPlant(cell, now)
+	if plant.growth >= crop.growSeconds then
+		self:_harvest(player, cell, crop)
+		return
+	end
+
+	if itemId == "water_can" then
+		self:_waterPlant(player, cell, now)
+	else
+		self:Notify(player, "Belum matang. Gunakan penyiram atau tunggu sebentar.", "info")
+	end
+end
+
+function FarmService:_useOnEmptyCell(player, cell, itemId, now)
+	local item = Config.Items[itemId]
+	if not item then
+		return
+	end
+
+	if itemId == "hoe" then
+		if not self.Inventory:HasItem(player, itemId, 1) then
+			return
+		end
+		if cell.tileType == "Grass" then
+			self.World:SetTileType(cell, "Farmland")
+			self:Notify(player, "Rumput dicangkul menjadi tanah kebun.", "success")
+		else
+			self:Notify(player, "Petak ini sudah siap untuk ditanami.", "info")
+		end
+		return
+	end
+
+	if itemId == "dirt_block" then
+		if cell.tileType == "Grass" then
+			if not self.Inventory:RemoveItem(player, itemId, 1) then
+				self:Notify(player, "Blok tanah tidak tersedia.", "warning")
+				return
+			end
+			self.World:SetTileType(cell, "Farmland")
+			self:Notify(player, "Blok tanah diletakkan menjadi petak kebun.", "success")
+		else
+			self:Notify(player, "Petak ini sudah berupa tanah kebun.", "info")
+		end
+		return
+	end
+
+	if itemId == "water_can" then
+		self:Notify(player, "Arahkan penyiram ke tanaman yang belum matang.", "warning")
+		return
+	end
+
+	local cropId, crop = Config.getCropForSeed(itemId)
+	if cropId then
+		self:_plantSeed(player, cell, itemId, cropId, crop)
+		return
+	end
+
+	self:Notify(player, "Item ini tidak dapat digunakan di petak kosong.", "warning")
+end
+
+function FarmService:_breakCell(player, cell, now)
+	if cell.plant then
+		local plant = cell.plant
+		local crop = Config.Crops[plant.cropId]
+		if not crop then
+			return
+		end
+
+		self:_refreshPlant(cell, now)
+		if plant.growth >= crop.growSeconds then
+			self:_harvest(player, cell, crop)
+		else
+			self.World:SetPlant(cell, nil)
+			self.Inventory:AddItem(player, crop.seedItem, 1)
+			self:Notify(player, "Tanaman dicabut. Satu benih dikembalikan.", "info")
+		end
+		return
+	end
+
+	if cell.tileType == "Farmland" then
+		self.World:SetTileType(cell, "Grass")
+		self:Notify(player, "Petak kebun dibongkar menjadi rumput.", "info")
+	else
+		self:Notify(player, "Tidak ada yang bisa dihancurkan di sini.", "info")
+	end
+end
+
+function FarmService:HandleAction(player, payload)
+	if type(payload) ~= "table" then
+		return
+	end
+
+	local action = payload.action
+	local itemId = payload.itemId
+	local x = payload.x
+	local z = payload.z
+
+	if (action ~= "use" and action ~= "break") or not isInteger(x) or not isInteger(z) then
+		return
+	end
+
+	if action == "use" and (type(itemId) ~= "string" or not Config.Items[itemId]) then
+		return
+	end
+
+	local cell = self.World:GetCell(x, z)
+	if not cell or not self:_isPlayerNearCell(player, cell) then
+		return
+	end
+
+	local time = os.clock()
+	if time - (self._cooldowns[player] or 0) < Config.Interaction.ActionCooldown then
+		return
+	end
+	self._cooldowns[player] = time
+
+	local now = os.time()
+	if action == "break" then
+		self:_breakCell(player, cell, now)
+	elseif cell.plant then
+		self:_useOnPlant(player, cell, itemId, now)
+	else
+		self:_useOnEmptyCell(player, cell, itemId, now)
+	end
+end
+
+return FarmService
